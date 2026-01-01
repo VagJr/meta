@@ -3,52 +3,107 @@
 <head>
 <meta charset="utf-8">
 <title>Meta AR</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 
 <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/ar.js@3.4.5/aframe/build/aframe-ar.min.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 
 <style>
-body { margin: 0; overflow: hidden; }
-#chat {
-    position: fixed; bottom: 0; width: 100%;
-    background: rgba(0,0,0,.6); color: #fff;
+body { margin:0; overflow:hidden; }
+#hud {
+  position: fixed; top: 10px; left: 10px;
+  background: rgba(0,0,0,.6); color:#fff;
+  padding:8px; font-size:14px;
 }
+#actions {
+  position: fixed; bottom: 10px; left:50%;
+  transform: translateX(-50%);
+}
+button { padding:10px; margin:5px; }
 </style>
 </head>
 
 <body>
+
 <a-scene embedded arjs>
-    <a-entity camera gps-camera rotation-reader></a-entity>
+  <a-entity id="cam" camera gps-camera rotation-reader></a-entity>
 </a-scene>
 
-<div id="chat">
-    <input id="msg" placeholder="Chat local..." />
+<div id="hud">
+  <div id="score">Score: 0</div>
+</div>
+
+<div id="actions">
+  <button onclick="createNote()">📝 Anotar</button>
 </div>
 
 <script>
 const socket = io();
-let myName = "User" + Math.floor(Math.random()*999);
+const scene = document.querySelector("a-scene");
+const entities = {};
+let myPos = null;
+let score = 0;
+const name = prompt("Seu nome?") || "Anon";
 
-navigator.geolocation.watchPosition(pos => {
-    socket.emit("join", {
-        name: myName,
-        lat: pos.coords.latitude,
-        lng: pos.coords.longitude
-    });
+navigator.geolocation.watchPosition(p => {
+  myPos = p.coords;
+  socket.emit("join", { name, lat: myPos.latitude, lng: myPos.longitude });
+  socket.emit("move", { lat: myPos.latitude, lng: myPos.longitude });
 }, null, { enableHighAccuracy: true });
 
-document.getElementById("msg").addEventListener("keydown", e => {
-    if (e.key === "Enter") {
-        socket.emit("chat", e.target.value);
-        e.target.value = "";
-    }
+function spawn(id, lat, lng, color, label) {
+  if (entities[id]) return;
+  const e = document.createElement("a-entity");
+  e.setAttribute("gps-entity-place", `latitude:${lat}; longitude:${lng}`);
+  e.setAttribute("geometry", "primitive:sphere; radius:1");
+  e.setAttribute("material", `color:${color}`);
+  if (label) {
+    const t = document.createElement("a-text");
+    t.setAttribute("value", label);
+    t.setAttribute("position", "0 2 0");
+    t.setAttribute("scale", "3 3 3");
+    e.appendChild(t);
+  }
+  scene.appendChild(e);
+  entities[id] = e;
+}
+
+socket.on("world_init", world => {
+  Object.values(world.orbs).forEach(o =>
+    spawn(o.id, o.lat, o.lng, "cyan", "ORB")
+  );
+  world.objects.forEach(o =>
+    spawn(o.id, o.lat, o.lng, "purple", o.text + "\n@" + o.author)
+  );
 });
 
-socket.on("chat", data => {
-    console.log(`${data.name}: ${data.text}`);
+socket.on("orb_collected", data => {
+  if (entities[data.orbId]) {
+    scene.removeChild(entities[data.orbId]);
+    delete entities[data.orbId];
+  }
+  if (data.player.name === name) {
+    score = data.player.score;
+    document.getElementById("score").innerText = "Score: " + score;
+  }
 });
+
+socket.on("object_created", obj =>
+  spawn(obj.id, obj.lat, obj.lng, "purple", obj.text + "\n@" + obj.author)
+);
+
+function createNote() {
+  if (!myPos) return;
+  const text = prompt("Anotação:");
+  if (!text) return;
+  socket.emit("create_object", {
+    lat: myPos.latitude,
+    lng: myPos.longitude,
+    text
+  });
+}
 </script>
+
 </body>
 </html>
