@@ -3,55 +3,114 @@
 <head>
 <meta charset="utf-8">
 <title>Meta AR</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 
 <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/ar.js@3.4.5/aframe/build/aframe-ar.min.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 
 <style>
-body { margin:0; overflow:hidden; }
+html, body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: black;
+}
+#loading {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-family: sans-serif;
+}
 #hud {
-  position: fixed; top: 10px; left: 10px;
-  background: rgba(0,0,0,.6); color:#fff;
-  padding:8px; font-size:14px;
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  background: rgba(0,0,0,.6);
+  color: #fff;
+  padding: 8px;
+  font-size: 14px;
+  z-index: 10;
 }
 #actions {
-  position: fixed; bottom: 10px; left:50%;
+  position: fixed;
+  bottom: 10px;
+  left: 50%;
   transform: translateX(-50%);
+  z-index: 10;
 }
-button { padding:10px; margin:5px; }
+button {
+  padding: 10px;
+}
 </style>
 </head>
 
 <body>
 
-<a-scene embedded arjs>
-  <a-entity id="cam" camera gps-camera rotation-reader></a-entity>
-</a-scene>
+<div id="loading">📡 Obtendo localização...</div>
 
-<div id="hud">
+<div id="hud" style="display:none">
   <div id="score">Score: 0</div>
 </div>
 
-<div id="actions">
-  <button onclick="createNote()">📝 Anotar</button>
+<div id="actions" style="display:none">
+  <button id="noteBtn">📝 Anotar</button>
 </div>
 
 <script>
 const socket = io();
-const scene = document.querySelector("a-scene");
-const entities = {};
+let scene, camera;
 let myPos = null;
 let score = 0;
+const entities = {};
 const name = prompt("Seu nome?") || "Anon";
 
-navigator.geolocation.watchPosition(p => {
-  myPos = p.coords;
-  socket.emit("join", { name, lat: myPos.latitude, lng: myPos.longitude });
-  socket.emit("move", { lat: myPos.latitude, lng: myPos.longitude });
-}, null, { enableHighAccuracy: true });
+// 1️⃣ PEDE GPS PRIMEIRO
+navigator.geolocation.getCurrentPosition(pos => {
+  myPos = pos.coords;
+  startAR();
+}, err => {
+  alert("GPS é obrigatório para o Meta AR");
+}, { enableHighAccuracy: true });
 
+// 2️⃣ INICIALIZA AR DEPOIS DO GPS
+function startAR() {
+  document.getElementById("loading").remove();
+  document.getElementById("hud").style.display = "block";
+  document.getElementById("actions").style.display = "block";
+
+  scene = document.createElement("a-scene");
+  scene.setAttribute("embedded", "");
+  scene.setAttribute("vr-mode-ui", "enabled:false");
+  scene.setAttribute("arjs", "sourceType: webcam; debugUIEnabled: false;");
+
+  camera = document.createElement("a-entity");
+  camera.setAttribute("camera", "");
+  camera.setAttribute("gps-camera", "");
+  camera.setAttribute("rotation-reader", "");
+
+  scene.appendChild(camera);
+  document.body.appendChild(scene);
+
+  socket.emit("join", {
+    name,
+    lat: myPos.latitude,
+    lng: myPos.longitude
+  });
+
+  navigator.geolocation.watchPosition(p => {
+    myPos = p.coords;
+    socket.emit("move", {
+      lat: myPos.latitude,
+      lng: myPos.longitude
+    });
+  }, null, { enableHighAccuracy: true });
+}
+
+// 3️⃣ SPAWN VISUAL
 function spawn(id, lat, lng, color, label) {
   if (entities[id]) return;
   const e = document.createElement("a-entity");
@@ -69,6 +128,7 @@ function spawn(id, lat, lng, color, label) {
   entities[id] = e;
 }
 
+// 4️⃣ SOCKET EVENTS
 socket.on("world_init", world => {
   Object.values(world.orbs).forEach(o =>
     spawn(o.id, o.lat, o.lng, "cyan", "ORB")
@@ -93,7 +153,8 @@ socket.on("object_created", obj =>
   spawn(obj.id, obj.lat, obj.lng, "purple", obj.text + "\n@" + obj.author)
 );
 
-function createNote() {
+// 5️⃣ CRIAR ANOTAÇÃO
+document.getElementById("noteBtn").onclick = () => {
   if (!myPos) return;
   const text = prompt("Anotação:");
   if (!text) return;
@@ -102,7 +163,7 @@ function createNote() {
     lng: myPos.longitude,
     text
   });
-}
+};
 </script>
 
 </body>
